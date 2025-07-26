@@ -1,52 +1,62 @@
 #!/bin/bash
-# Active Scan Script for bbdash
+# Enhanced Active Scan Script for bbdash
 
 TARGET=$1
 OUTDIR="output/$TARGET"
 NUCLEI_TEMPLATES="$HOME/nuclei-templates"
 
+mkdir -p "$OUTDIR"
+
 echo "[*] Starting active scans for: $TARGET"
-echo "[*] Using output folder: $OUTDIR"
+echo "[*] Output directory: $OUTDIR"
 
-# ─────────────────────────────────────────────
-echo "[1] Nuclei Scan (OWASP, CVEs, Exposures)..."
+# Check file existence
+if [[ ! -f "$OUTDIR/scan_targets.txt" ]]; then
+  echo "[!] Missing scan_targets.txt in $OUTDIR"
+  exit 1
+fi
+
+if [[ ! -f "$OUTDIR/scan_params.txt" ]]; then
+  echo "[!] Missing scan_params.txt in $OUTDIR"
+  touch "$OUTDIR/scan_params.txt"
+fi
+
+# ────────────── NUCLEI (General + OWASP Templates) ──────────────
+echo "[1] Nuclei: OWASP/CVE/Exposures"
 nuclei -l "$OUTDIR/scan_targets.txt" -t "$NUCLEI_TEMPLATES" \
-  -severity low,medium,high,critical -o "$OUTDIR/nuclei-results.txt"
+  -severity low,medium,high,critical \
+  -o "$OUTDIR/nuclei-results.txt"
 
-echo "[✓] Nuclei results saved to: $OUTDIR/nuclei-results.txt"
-
-# ─────────────────────────────────────────────
-echo "[2] Dalfox XSS Param Scan..."
-dalfox file "$OUTDIR/scan_params.txt" --custom-header "X-Test: scan" --mining-dict wordlists/params.txt \
+# ────────────── Dalfox XSS Scan ──────────────
+echo "[2] Dalfox XSS Fuzzing"
+dalfox file "$OUTDIR/scan_params.txt" --custom-header "X-Test: scan" \
+  --mining-dict wordlists/params.txt \
   --output "$OUTDIR/dalfox-results.txt" --format plain
 
-echo "[✓] Dalfox XSS results saved to: $OUTDIR/dalfox-results.txt"
+# ────────────── KXSS (JS Param Reflection) ──────────────
+echo "[3] KXSS Analysis"
+if [[ -f "$OUTDIR/jsfiles.txt" ]]; then
+  cat "$OUTDIR/jsfiles.txt" | kxss > "$OUTDIR/kxss-results.txt"
+else
+  echo "[!] jsfiles.txt not found, skipping KXSS"
+fi
 
-# ─────────────────────────────────────────────
-echo "[3] KXSS (JS-based reflected param finder)..."
-cat "$OUTDIR/jsfiles.txt" | kxss > "$OUTDIR/kxss-results.txt"
-echo "[✓] KXSS results saved to: $OUTDIR/kxss-results.txt"
+# ────────────── Misconfiguration Templates (CORS, Redirects) ──────────────
+echo "[4] Nuclei: Misconfig (CORS, SSRF, Open Redirect)"
+nuclei -l "$OUTDIR/scan_targets.txt" -t "$NUCLEI_TEMPLATES/misconfiguration/" \
+  -o "$OUTDIR/nuclei-misconfig.txt"
 
-# ─────────────────────────────────────────────
-echo "[4] SSRF, CORS, Open Redirect via nuclei templates..."
-nuclei -l "$OUTDIR/scan_targets.txt" \
-  -t "$NUCLEI_TEMPLATES"/misconfiguration/ -o "$OUTDIR/nuclei-misconfig.txt"
-
-echo "[✓] Misconfig scan complete: $OUTDIR/nuclei-misconfig.txt"
-
-# ─────────────────────────────────────────────
-echo "[5] Arjun (Parameter Discovery)..."
+# ────────────── Arjun (Hidden Parameter Discovery) ──────────────
+echo "[5] Arjun Param Discovery"
 arjun -i "$OUTDIR/scan_targets.txt" -oT "$OUTDIR/arjun-params.txt"
-echo "[✓] Arjun param results: $OUTDIR/arjun-params.txt"
 
-# ─────────────────────────────────────────────
-echo "[6] FFUF Directory Brute-Force (Common paths)..."
+# ────────────── FFUF Directory Brute-Force ──────────────
+echo "[6] FFUF Directory Brute-force"
 while read -r url; do
   ffuf -w wordlists/common-dirs.txt -u "$url/FUZZ" -mc 200 -t 50 \
     -of html -o "$OUTDIR/ffuf-$(echo $url | cut -d/ -f3).html"
 done < "$OUTDIR/scan_targets.txt"
 
-echo "[✓] FFUF scans complete (HTML files in $OUTDIR)"
-
-# ─────────────────────────────────────────────
-echo "[✓] Scanning complete for: $TARGET"
+# ────────────── Summary ──────────────
+echo "[✓] All scans completed for: $TARGET"
+echo "[✓] Results saved in: $OUTDIR"

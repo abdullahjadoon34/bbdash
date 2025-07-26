@@ -1,30 +1,43 @@
 #!/bin/bash
 
-# -------------------------------
-# serve-report.sh
-# Launches local dashboard in browser
-# -------------------------------
+# serve-report.sh - Serve HTML bug bounty report via local HTTP
 
 PORT=8080
-REPORT_DIR="reports"
-INDEX_FILE="index.html"
+
+# Allow target name as argument
+TARGET="$1"
+OUTPUT_DIR="output"
+
+# If no target passed, ask user to select one
+if [ -z "$TARGET" ]; then
+  echo "📂 Available reports:"
+  ls "$OUTPUT_DIR"
+  echo -n "📝 Enter target name to serve report: "
+  read TARGET
+fi
+
+REPORT_HTML="$OUTPUT_DIR/$TARGET/report.html"
 
 # Check if report exists
-if [ ! -f "$REPORT_DIR/$INDEX_FILE" ]; then
-  echo "❌ $INDEX_FILE not found in $REPORT_DIR. Please run a scan first."
+if [ ! -f "$REPORT_HTML" ]; then
+  echo "❌ Report not found: $REPORT_HTML"
+  echo "👉 Please run ./report.sh $TARGET first."
   exit 1
 fi
 
-# Start a simple HTTP server
-echo "📡 Serving reports on http://localhost:$PORT"
-cd "$REPORT_DIR"
+cd "$OUTPUT_DIR/$TARGET"
 
-# Try Python3, then fallback to Python
+# Serve the report
+echo "📡 Serving report for '$TARGET' at: http://localhost:$PORT/report.html"
+echo "🌐 Opening in browser..."
+xdg-open "http://localhost:$PORT/report.html" &>/dev/null || open "http://localhost:$PORT/report.html" &>/dev/null
+
+# Start local server
 if command -v python3 &>/dev/null; then
   python3 -m http.server "$PORT"
 elif command -v python &>/dev/null; then
   python -m SimpleHTTPServer "$PORT"
 else
-  echo "❌ Python is not installed. Install Python to serve the report."
+  echo "❌ Python is not installed. Please install Python to use this feature."
   exit 1
 fi
